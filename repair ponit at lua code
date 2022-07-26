@@ -1,0 +1,638 @@
+function Update(I)
+--a = GetRepairTarget(I)
+Actavate(I)
+--I:Log(a)
+end
+--Description:
+--GetRepairTarget(I) only outputs the UniqueId of the prefured repaire target. if no targets are found outputs -1 instead.
+--Options: (min / max hp is the min / max HP of the craft that you want to target. filters out all toher craft. finsihed HP is the HP the craft we are targeting can have before it becomes invallid )
+local maxHP = 0.95
+local minHP = 0.40
+local finsihedHP = 1
+--Weights: (HP down is one per % of HP lost. so 75% hp craft would generate 25 * HPdownW weight.)
+local HPdownW = 3
+local distinceW = -1
+local heightW = 0
+--speedW
+--sizeW
+
+--Options:
+
+--Proformance options:
+local timeToFindTarget = 1 -- every X seconds, the craft will see if there is an new repaire target
+local timeToAvoidCollision = 0.01 --every X seconds, the craft will see if it can avoid / stop avoiding collisions
+
+local controlHight = true;
+local controlYaw = true;
+local controlForward = true;
+local controlStrath = true;
+--NOT YET IMPEMENTED
+local controlRoll = false;--roll to turn
+--NOT YET IMPEMENTED
+local controlPitch = false;--pitch to gain hight
+
+--MovementOptions
+local orderCompleatDistince = 5
+
+--Colsision avoidance options
+local avoidRange = 5
+local avoidAngle = 45
+local AngleAddForCloseRange = 1 --for every meter closer then avoidRange an unit is, the avoidAngle is increase by this mush
+local maxAvoidAngle = 90
+local avoidFrindly = true
+local avoidHostile = true
+
+
+--Height data and options
+local heightMode = 2 --0 = obove water, 1 = obove water/land, 2 = obove target
+local distinceFromTarget = 5 -- The distince away from the target that we stop at.
+local targetHeight = 10
+local maxHeight = 200
+local minHeightWater = 10
+local minHeightLand = 50
+
+--Pitchup/down angle options
+--NOT YET IMPEMENTED
+local maxPitch = 0
+local pitchUpWhenTruning = false --for roll when turning
+
+--Roll When Truning Options
+--NOT YET IMPEMENTED
+local reqTrunAngleBeforeRoll = 25
+local rollWhenTurnAngle = 180
+
+--Forward options
+local forwardAlwaysDrive = 0 --so planes dont crash from the sky
+local forwardsAngle = 90 --angle to target before we try to move forwards / backwards
+
+--Strath options
+local strathInRangeOfWayponit = 20 --for when you want to just slide to your wayponit position with strafe
+local strathAngle = 90 --what angle I my strafh at. (90 is always. 0 is only your side is faceing the target)
+--PID options
+--time is litterly time. like the amount of time that passes. dose not need to be stored here at all.
+
+local HeightPID = {P = 1,I = 1,D = 10,Time = 120,Integral=0,Error=0}
+local HeightPIDOn = true;
+--HeightPID.P = 1
+--HeightPID.I = 1
+--HeightPID.D = 10
+--HeightPID.Time = 120
+
+local ForwardPID = {P = 1,I = 1,D = 10,Time = 120,Integral=0,Error=0}
+local ForwardPIDOn = true;
+
+local YawPID = {P = 1,I = 1,D = 20,Time = 120,Integral=0,Error=0}
+local YawPIDOn = true;
+
+local StrathPID = {P = 1,I = 1,D = 10,Time = 120,Integral=0,Error=0}
+local StrathPIDOn = true;
+
+local RollPID = {P = 1,I = 1,D = 10,Time = 120,Integral=0,Error=0}
+local RollPIDOn = true;
+
+local PitchPID = {P = 1,I = 1,D = 10,Time = 120,Integral=0,Error=0}
+local PitchPIDOn = true;
+
+--////////////////////////////////////////////////////////////////////////////////////////////////--
+
+function PID(X,error)
+ local lastError = X.Error
+ X.Error = error
+ --applyP--
+ local correction = X.Error *X.P
+ --applyI
+ X.Integral = (X.Integral * (X.Time - 1) + X.Error)/X.Time
+ correction = correction + X.Integral*X.I
+ --applyD
+ return correction + (X.Error - lastError) * X.D
+end
+
+--AI controls (EDIT AT YOUR OWN RISK)--
+
+local lastTime = 0
+local targetTimer = 0
+local collisionTimer = 0
+local lastAvoidWayponit = null
+
+function Actavate(I)
+ if I:GetAIMovementMode(0) == "Fleet" or I:GetAIMovementMode(0) == "Off" then
+  return -1
+ end
+ updateTimer(I)
+ local target = targetLast
+ if targetTimer >= timeToFindTarget then
+  target = GetRepairTarget(I)
+  targetTimer = 0
+ end
+ target = GetRepairTarget(I)
+ if target == -1 then
+  return -1
+ end
+ I:Log("--------")
+ I:Log("--------") 
+ I:Log("--------")
+ I:Log(target)
+ I:TellAiThatWeAreTakingControl()
+ local targetData = I:GetFriendlyInfoById(target)
+ local myPos = I:GetConstructPosition()
+ local targetPos = targetData.ReferencePosition
+ --Math.atan2( y2 - y1, x2 - x1 ) * ( 180 / Math.PI )
+ local targetAngle = math.atan2(targetPos.x - myPos.x, targetPos.z - myPos.z ) * ( 180 / math.pi )
+
+ I:Log("target position")
+ I:Log(targetPos.x)
+ I:Log(targetPos.y)
+ I:Log(targetPos.z)
+ I:Log("---")
+ local avoid = {false}
+ if collisionTimer >= timeToAvoidCollision then
+  avoid = CollisionAvoidance(I)
+  lastAvoidWayponit = avoid[2]
+  collisionTimer = 0
+ elseif lastAvoidWayponit ~= null then
+  avoid = {true,lastAvoidWayponit}
+ end
+ if avoid[1] then
+  I:Log("avoiding other craft...")
+  goToPos(avoid[2],targetAngle,I)
+  return -1
+ end
+
+ targetPos = adjustTarget(targetData,I)
+ goToPos(targetPos,targetAngle,I)
+end
+
+function updateTimer(I)
+ if lastTime > I:GetGameTime() then lastTime = I:GetGameTime() end
+ local time = I:GetGameTime() - lastTime
+ lastTime = I:GetGameTime()
+ targetTimer = targetTimer + time
+ collisionTimer = collisionTimer + time
+end
+
+--Collision Avoidance--
+
+function CollisionAvoidance(I)
+ local AvoidRanges = {}
+ local c = 0
+ --I:Log("CollisionAvoidance")
+ local myPos = I:GetConstructPosition()
+ local mySize = getMySize(I)
+ if avoidHostile then
+  for a=0,I:GetNumberOfMainframes(),1 do
+   for b=0,I:GetNumberOfTargets(a),1 do
+    local obstical = I:GetTargetPositionInfo(a, b)
+    if obstical.Valid then
+     if inXZRange(myPos,obstical.Position,avoidRange + mySize + getEnamySize(obstical,I),I) then
+       I:Log("Hostile In Range")
+       --get relitive xz angle and relitive xy angle
+       local AngleXZ = math.atan2(obstical.Position.x - myPos.x, obstical.Position.z - myPos.z ) * ( 180 / math.pi )
+       --AngleXY = math.atan2(obstical.Position.x - myPos.x, obstical.Position.y - myPos.y ) * ( 180 / math.pi )
+       local AngleXY = math.atan2(0, obstical.Position.y - myPos.y ) * ( 180 / math.pi )
+       local x = obstical.Position.x - myPos.x
+       local z = obstical.Position.z - myPos.z
+       local avoidAngle2 = (avoidRange - math.sqrt(math.max(x,x * - 1) + math.max(z,z * - 1))) * AngleAddForCloseRange
+       AngleXZ = math.max(AngleXZ,AngleXZ * -1)
+       AngleXY = math.max(AngleXY,AngleXY * -1)
+       local angle = {AngleXZ,AngleXY,avoidAngle + avoidAngle2}
+       AvoidRanges[c] = angle
+       c = c + 1
+       I:Log(getAngleOffset(I:GetConstructYaw(),AngleXZ,I))
+     end
+    end
+   end
+  end
+ end
+
+ if avoidFrindly then
+  for a=0,I:GetFriendlyCount(),1 do
+   local obstical = I:GetFriendlyInfo(a)
+   if obstical.Valid then
+     local obsticalPosition = obstical.ReferencePosition
+     if inXZRange(myPos,obsticalPosition,avoidRange + getFriendlySize(obstical,I) + mySize) then
+       --I:Log("Friendly In Range")
+      --get relitive xz angle and relitive xy angle
+       local AngleXZ = math.atan2(obsticalPosition.x - myPos.x, obsticalPosition.z - myPos.z ) * ( 180 / math.pi )
+       --AngleXY = math.atan2(obsticalPosition.x - myPos.x, obsticalPosition.y - myPos.y ) * ( 180 / math.pi )
+       local AngleXY = math.atan2(0, obsticalPosition.y - myPos.y ) * ( 180 / math.pi )
+       --get relitive xz angle and relitive xy angle
+       local x = obsticalPosition.x - myPos.x
+       local z = obsticalPosition.z - myPos.z
+       local avoidAngle2 = (avoidRange - (math.sqrt(math.max(x,x * - 1) + math.max(z,z * - 1)))) * AngleAddForCloseRange
+       AngleXZ = math.max(AngleXZ,AngleXZ * -1)
+       AngleXY = math.max(AngleXY,AngleXY * -1)
+       local angle = {AngleXZ,AngleXY,avoidAngle + avoidAngle2}
+       AvoidRanges[c] = angle
+       c = c + 1
+       --I:Log(getAngleOffset(I:GetConstructYaw(),AngleXZ,I))
+     end
+    end
+  end
+ end
+ return {c ~= 0,avoidFindWaypont(AvoidRanges,c,I)}
+end
+
+function avoidFindWaypont(AvoidRanges,c,I)
+ if c == 0 then
+  return
+ end
+ I:Log("avoid data")
+ for d=0,c - 1,1 do
+ I:Log(AvoidRanges[d][1])
+ I:Log(AvoidRanges[d][2])
+ I:Log(AvoidRanges[d][3])
+ end
+ local myPos = I:GetConstructPosition()
+ local movePos = {x=myPos.x,y=myPos.y,z=myPos.z}
+ --I:Log("EVADE!")
+ local TAngle = 0
+ local TNumber = 0
+ for a=0,c - 1,1 do
+  Tangle = TAngle + (AvoidRanges[a][1] * AvoidRanges[a][3])
+  TNumber = TNumber + AvoidRanges[a][3]
+ end
+ local angle = ((Tangle / TNumber) + 180) % 360
+ I:Log(I:GetConstructYaw())
+ local avoided = true
+ for d=0,c - 1,1 do
+  --if AvoidRanges[d] == null then
+   --a = a + 1
+  --end
+  local avoid2 = AvoidRanges[d]
+  --if angle drives me into angle of another craft. 
+  local temp = (getAngleOffset(angle,avoid2[1],I))
+  temp = math.max(temp,temp*-1)
+  if temp <= avoidAngle then
+   avoided = false
+   break
+  end
+ end
+ if avoided then
+  --adjust movePos to be moveing turds this angle.
+  I:Log("finding avoid wayponit")
+  I:Log(angle)
+  length = (orderCompleatDistince + avoidRange) + 10 --. angle = angle. direction = angle / 90.
+  --getAB(ab,length) --: a = angle, b = 90 - angle. length = length.
+  --X direction = angle / 180 -> [0 = 1, 1 = -1]
+  --Z direction = (angle + 90 % 360) / 180 -> [0 = 1, 1 = -1]
+  --0 - 89 [1,1], 90 - 179 [-1,1], 180,269 = [-1-1], 270,359 [1,-1]
+  local DX = getAB(angle % 90,length)
+  local DZ = getAB(90 - (angle % 90),length)
+  I:Log(DX)
+  I:Log(DZ)
+  if ((angle) % 360) > 180 then
+   DX = DX * -1
+  end
+  if ((angle + 90) % 360) > 180 then
+   DZ = DZ * -1
+  end
+  I:Log(DX)
+  I:Log(DZ)
+  movePos.x = movePos.x + DX
+  --movePos.y = movePos.y
+  movePos.y = balanceHeight(movePos.y,I)
+  movePos.z = movePos.z + DZ
+  return movePos
+ end
+ return movePos
+end
+
+function getMySize(I)
+ local sizeUp = I:GetConstructMaxDimensions()
+ local sizeDown = I:GetConstructMinDimensions()
+ return math.max(sizeUp.x - sizeDown.x,sizeUp.y - sizeDown.y,sizeUp.z - sizeDown.z)
+end
+
+function getFriendlySize(unitData,I)
+ local sizeUp = unitData.AxisAlignedBoundingBoxMaximum
+ local sizeDown = unitData.AxisAlignedBoundingBoxMinimum
+ return math.max(sizeUp.x - sizeDown.x,sizeUp.y - sizeDown.y,sizeUp.z - sizeDown.z)
+end
+
+function getEnamySize(unitData,I)
+ local sizeUp = I:GetConstructMaxDimensions()
+ local sizeDown = I:GetConstructMinDimensions()
+ return math.max(sizeUp.x - sizeDown.x,sizeUp.y - sizeDown.y,sizeUp.z - sizeDown.z)
+end
+
+--Were To move Relitive To Target--
+
+function adjustTarget(targetData,I)
+ --error: NEED TO ADD targetsize+mysize to distinceFromTarget
+ local targetPos = targetData.ReferencePosition
+ local mySize = getMySize(I)
+ local targetSize = getFriendlySize(targetData,I)
+ local myPos = I:GetConstructPosition()
+
+ local angle = math.atan2(myPos.x - targetPos.x,myPos.z - targetPos.z) * ( 180 / math.pi )
+ if angle < 0 then angle = 360 + angle end
+ I:Log("adjustments")
+ I:Log(angle)
+ local length = distinceFromTarget + mySize + targetSize
+ local DX = getAB(angle % 90,length)
+ local DZ = getAB(90 - (angle % 90),length)
+ if ((angle) % 360) > 180 then
+  DX = DX * -1
+ end
+ if ((angle + 90) % 360) > 180 then
+  DZ = DZ * -1
+ end
+ targetPos.x = targetPos.x + DX
+ targetPos.y = FindHeight(targetPos,myPos,I)
+ targetPos.z = targetPos.x + DZ
+return targetPos
+end
+
+function adjustTargetOLD(targetData,I)
+ --error: NEED TO ADD targetsize+mysize to distinceFromTarget
+ local targetPos = targetData.ReferencePosition
+ local mySize = getMySize(I)
+ local targetSize = getFriendlySize(targetData,I)
+ local myPos = I:GetConstructPosition()
+ local directionX = targetPos.x - myPos.x
+ local directionZ = targetPos.z - myPos.z
+ --(ratiot = x + z)(ratio(x or z) = (x or z) / ratio) 
+ local ratiot = math.max(directionX,directionX * -1) + math.max(directionZ,directionZ * -1)
+ local ratiox = directionX / ratiot
+ local ratioz = directionZ / ratiot
+ --also need to add target size + mysize to target 
+ I:Log("changes")
+ I:Log(ratiox * (distinceFromTarget + mySize + targetSize))
+ I:Log(ratioz * (distinceFromTarget + mySize + targetSize))
+
+ targetPos.x = targetPos.x - (ratiox * (distinceFromTarget + mySize + targetSize))
+ targetPos.z = targetPos.z - (ratioz * distinceFromTarget + mySize + targetSize)
+ targetPos.y = FindHeight(targetPos,myPos,I)
+return targetPos
+end
+
+--Waypont Movement Code--
+
+function goToPos(targetPos,targetAngle,I)
+ I:Log("wayponit pos:")
+ I:Log(targetPos.x)
+ I:Log(targetPos.y)
+ I:Log(targetPos.z)
+ I:Log(targetAngle)
+ local myYaw = I:GetConstructYaw()
+ local myPos = I:GetConstructPosition()
+ I:Log("--")
+ I:Log("my pos:")
+ I:Log(myPos.x)
+ I:Log(myPos.y)
+ I:Log(myPos.z)
+ I:Log(myYaw)
+ I:Log("--")
+ I:Log("turn")
+ I:Log(getAngleOffset(myYaw,targetAngle,I))
+ local requestedAngle = FindAngle(targetPos,myPos,I)
+ local there = inXZRange(myPos,targetPos,orderCompleatDistince,I)
+ local inStrathRange = inXZRange(myPos,targetPos,strathInRangeOfWayponit,I)
+ if controlYaw then
+  if there == false and (inStrathRange == false or controlStrath == false) then
+   ApplyYaw(requestedAngle,myYaw,I)
+   --I:Log("requestedAngle")
+  else
+   ApplyYaw(targetAngle,myYaw,I)
+   --I:Log("targetAngle")
+  end
+ end
+ if controlHight then -- and notThere then
+  ApplyHeight(myPos,targetPos.y,I)
+ end
+ if controlStrath and there == false and inStrathRange then
+  I:Log("Strath")
+  ApplyStrath(GetStrath(targetPos,myPos,requestedAngle,myYaw,I),I)
+ end
+ if controlForward then
+  if forwardAlwaysDrive ~= 0 then
+   ApplyForward(forwardAlwaysDrive,I)
+  elseif there == false then
+   ApplyForward(GetForward(targetPos,myPos,requestedAngle,myYaw,I),I)
+  end
+ end
+ RorP = RollOrPitch(I)
+ if controlRoll and RorP and there == false then
+  ApplyRoll(I)
+ end
+ if controlPitch and RorP and there == false == false then
+  --FindHeight(targetPos,myPos,I)
+  ApplyPitch(I)
+ end
+end
+
+function FindHeight(targetPos,myPos,I)
+ local mySize = 0--getSize()
+ local targetSize = 0--getSize()
+ local HM2ExstraHeight = mySize + targetSize
+ if targetHeight < 0 and heightMode == 2 then
+  HM2ExstraHeight = HM2ExstraHeight * -1
+ end
+ local terrainHere = I:GetTerrainAltitudeForLocalPosition(myPos.x,myPos.y,myPos.z)
+ local terrainTarget = I:GetTerrainAltitudeForLocalPosition(targetPos.x,targetPos.y,targetPos.z)
+ local height = math.max(terrainHere,terrainTarget)
+ height = math.max(height + minHeightLand,minHeightWater)
+ if heightMode == 0 then
+  height = math.max(height,targetHeight)
+ elseif heightMode == 1 then
+  height = math.max(height,math.max(targetHeight + terrainHere,targetHeight + terrainThere))
+ elseif heightMode == 2 then
+  height = math.max(height,targetHeight + targetPos.y + HM2ExstraHeight)
+ end
+ height = math.min(height,maxHeight)
+ return height
+ --I:Log(terrainHere)
+ --I:Log(terrainTarget)
+end
+
+function ApplyHeight(myPos,Height,I)
+ if HeightPIDOn then
+  I:SetPropulsionRequest(7, PID(HeightPID,Height - myPos.y))
+  return
+ end
+ local drive = 1
+ if myPos.y > Height then
+  drive = drive * -1
+ end
+ --I:Log(drive)
+ I:SetPropulsionRequest(7, drive)
+end
+
+function RollOrPitch(I)
+return true--only when i need to Roll right now.
+end
+function ApplyPitch(I)
+--will control Pitch based altattood controls
+ local error = 0
+ PID(PitchPID,error)
+end
+function ApplyRoll(I)
+--will control Roll bassed turning controls.
+ local error = 0
+ PID(RollPID,error)
+end
+
+function GetForward(pos,myPos,angle,myAngle,I)
+ --local angleIndex = math.floor(angle/90)
+ --local distince = 1--angles[angleIndex].x * (myPos - pos) angles[angleIndex].z
+ --I WILL NOW USE TRIG!
+ local offset = getAngleOffset(myAngle,angle,I)
+ --angle A = A % 90. angleB = 90 - A .  Aside = CSide*Sin(angleA)
+ --(find a. for strath find b)
+ --local myRange = math.sqrt(x^2 + z^2)
+ distince = getAB(offset % 90,math.sqrt((myPos.x - pos.x)^2 + (myPos.z - pos.z)^2))
+ --I:Log("distinceX")
+ --I:Log(distince)
+ if offset >= -forwardsAngle and offset <= forwardsAngle then
+  return math.max(distince,distince * -1)--1--direction * -1
+ elseif (offset + 180) >= -(forwardsAngle) and (offset + 180) <= forwardsAngle then
+  return math.min(distince,distince * -1)--1--direction
+ end
+ return 0
+end
+
+function ApplyForward(drive,I)
+ if ForwardPIDOn then
+  I:SetPropulsionRequest(6,PID(ForwardPID,drive))
+  return
+ end
+ I:SetPropulsionRequest(6,drive)
+ distince = Vector3.Distance(I:GetConstructPosition(), tempData.ReferencePosition)
+end
+
+function GetStrath(pos,myPos,reAngle,myAngle,I)
+ local offset = getAngleOffset(myAngle,reAngle)
+ local offsettemp = 90 - (offset % 90)
+ local distince = getAB(offsettemp % 90,math.sqrt((myPos.x - pos.x)^2 + (myPos.z - pos.z)^2))
+ --I:Log("distinceX")
+ --I:Log(distince)
+ offset = offset - 90
+ if offset >= -strathAngle and offset <= strathAngle then
+  return math.max(distince,distince * -1)--1--direction * -1
+ elseif (offset + 180) >= -(strathAngle) and (offset + 180) <= strathAngle then
+  return math.min(distince,distince * -1)--1--direction
+ end
+ return distince
+end
+
+function ApplyStrath(drive,I)
+  if StrathPIDOn then
+   --StrathPID
+   I:SetPropulsionRequest(8,PID(StrathPID,drive))
+  return
+ end
+ --I:Log(secondary)
+ I:SetPropulsionRequest(8,drive)
+--will run straff commands
+--if side to target and withen 'slide' range, move to target
+end
+
+function FindAngle(targetPos,myPos,I)
+ local distinceX = targetPos.x - myPos.x
+ local distinceZ = targetPos.z - myPos.z
+ local requestedAngle = math.atan2(distinceX,distinceZ) * (180/math.pi)
+ --I:Log("FindAngle")
+ --I:Log(requestedAngle)
+ if requestedAngle < 0 then
+  requestedAngle = 360 + requestedAngle
+ end
+ --I:Log(requestedAngle)
+ return requestedAngle
+end
+
+function ApplyYaw(reAngle,myAngle,I)
+--currently runs yaw commands. needs to also run roll to pitch commands. (maybe do them in an diffrent function?)
+ if ForwardPIDOn then
+  --(set myAgnle to 180. keep the distince between angles) --this is required so that when an angle is 350 to 10, i can turn to the 10
+  --I:Log("Yaw Commands")
+  --I:Log(myAngle)
+  --I:Log(reAngle)
+  --reAngle = reAngle - 180 - myAngle
+  --if reAngle < 0 then
+  -- reAngle = 360 + reAngle
+  --end
+  reAngle = getAngleOffset(myAngle,reAngle)
+  I:Log(reAngle)
+  I:SetPropulsionRequest(5,PID(YawPID,reAngle))
+  return
+ end
+ local angleChange = 1
+ if LeftOrRight(reAngle,myYaw,I) then
+  angleChange = angleChange *-1
+ end
+ I:SetPropulsionRequest(5,angleChange)
+end
+
+function LeftOrRight(reAngle,myAngle,I)
+ --true for left, false for right
+ --I:Log(reAngle)
+ --I:Log(myAngle)
+ local add = (myAngle + 180)
+ if add > 360 and reAngle < add % 360 then
+  return true
+ end
+ if reAngle > myAngle and reAngle < add then
+  return true
+ end
+ return false
+end
+
+function inXZRange(myPos,targetPos,range,I)
+ local x = myPos.x - targetPos.x
+ local z = myPos.z - targetPos.z
+ x = math.max(x,x * -1)
+ z = math.max(z,z * -1)
+ local myRange = math.sqrt(x^2 + z^2)
+ if myRange < range then
+  --I:Log("in range")
+  return true
+ end
+  --I:Log("out range")
+ return false
+end
+function getAngleOffset(angle1,angle2,I)
+ local re = (angle2+(360-angle1)) - 360 
+ if re > 180 then
+  re = -360 + re 
+ end
+ if re < -180 then
+  re =  360 + re
+ end
+ return re
+end
+
+function getAB(angleAB,sideC)
+ --angle A = A % 90. angleB = 90 - A .  Aside = CSide*Sin(angleA)
+ local sideAB = sideC * math.sin(math.rad(angleAB))
+ --math.sin(1)
+ return sideAB
+end
+
+function balanceHeight(height,I)
+ local land = I:GetTerrainAltitudeForPosition(I:GetConstructPosition())
+ return math.max(math.min(height,maxHeight),minHeightLand + land,minHeightWater)
+end
+
+--Find repair target--
+
+local targetLast = -1
+--find repair target here
+function GetRepairTarget(I)
+ local target = -1
+ local targetWeight = -99999
+ for b=0,I:GetFriendlyCount(),1 do
+  local tempData = I:GetFriendlyInfo(b)
+  local distince = Vector3.Distance(I:GetConstructPosition(), tempData.ReferencePosition)
+  --get Size
+  --no idea how to do this
+  --get Weight
+  local tempWeight = ((1 - tempData.HealthFraction) * 100 * HPdownW) + (distince * distinceW) + (tempData.ReferencePosition.y * heightW)
+  --set target unit
+  if tempWeight > targetWeight and ((tempData.HealthFraction >= minHP and tempData.HealthFraction <= maxHP) or (tempData.Id == targetLast and tempData.HealthFraction < finsihedHP)) then
+   target = tempData.Id
+   targetWeight = tempWeight
+  end
+ end
+ targetLast = target
+ return target
+end
