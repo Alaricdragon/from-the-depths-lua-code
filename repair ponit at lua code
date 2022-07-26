@@ -5,6 +5,10 @@ Actavate(I)
 end
 --Description:
 --GetRepairTarget(I) only outputs the UniqueId of the prefured repaire target. if no targets are found outputs -1 instead.
+
+--Options:
+
+--Target Prioritation Options:
 --Options: (min / max hp is the min / max HP of the craft that you want to target. filters out all toher craft. finsihed HP is the HP the craft we are targeting can have before it becomes invallid )
 local maxHP = 0.95
 local minHP = 0.40
@@ -16,7 +20,12 @@ local heightW = 0
 --speedW
 --sizeW
 
---Options:
+
+
+--Target Movement Options:
+local DFTSizeMulti = 1 -- this multiplys the size of bouth yourself and the target, for distinceFromTarget + targetSize + yourSize calculations
+local distinceFromTarget = 5 -- The distince away from the target that we stop at.
+--to get 'height relitive to target, go to height options--
 
 --Proformance options:
 local timeToFindTarget = 1 -- every X seconds, the craft will see if there is an new repaire target
@@ -45,7 +54,6 @@ local avoidHostile = true
 
 --Height data and options
 local heightMode = 2 --0 = obove water, 1 = obove water/land, 2 = obove target
-local distinceFromTarget = 5 -- The distince away from the target that we stop at.
 local targetHeight = 10
 local maxHeight = 200
 local minHeightWater = 10
@@ -328,41 +336,23 @@ function adjustTarget(targetData,I)
  if angle < 0 then angle = 360 + angle end
  I:Log("adjustments")
  I:Log(angle)
- local length = distinceFromTarget + mySize + targetSize
- local DX = getAB(angle % 90,length)
- local DZ = getAB(90 - (angle % 90),length)
+ local length = distinceFromTarget + ((mySize + targetSize
+) * DFTSizeMulti)
+ I:Log(length)
+ angle = angle % 90
+ local DX = getAB(angle,length)
+ local DZ = getAB(90 - angle,length)
  if ((angle) % 360) > 180 then
   DX = DX * -1
  end
  if ((angle + 90) % 360) > 180 then
   DZ = DZ * -1
  end
+ I:Log(DZ)
+ I:Log(DX)
  targetPos.x = targetPos.x + DX
  targetPos.y = FindHeight(targetPos,myPos,I)
- targetPos.z = targetPos.x + DZ
-return targetPos
-end
-
-function adjustTargetOLD(targetData,I)
- --error: NEED TO ADD targetsize+mysize to distinceFromTarget
- local targetPos = targetData.ReferencePosition
- local mySize = getMySize(I)
- local targetSize = getFriendlySize(targetData,I)
- local myPos = I:GetConstructPosition()
- local directionX = targetPos.x - myPos.x
- local directionZ = targetPos.z - myPos.z
- --(ratiot = x + z)(ratio(x or z) = (x or z) / ratio) 
- local ratiot = math.max(directionX,directionX * -1) + math.max(directionZ,directionZ * -1)
- local ratiox = directionX / ratiot
- local ratioz = directionZ / ratiot
- --also need to add target size + mysize to target 
- I:Log("changes")
- I:Log(ratiox * (distinceFromTarget + mySize + targetSize))
- I:Log(ratioz * (distinceFromTarget + mySize + targetSize))
-
- targetPos.x = targetPos.x - (ratiox * (distinceFromTarget + mySize + targetSize))
- targetPos.z = targetPos.z - (ratioz * distinceFromTarget + mySize + targetSize)
- targetPos.y = FindHeight(targetPos,myPos,I)
+ targetPos.z = targetPos.z + DZ
 return targetPos
 end
 
