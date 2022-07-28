@@ -74,9 +74,9 @@ local forwardAlwaysDrive = 0 --so planes dont crash from the sky
 local forwardsAngle = 90 --angle to target before we try to move forwards / backwards
 
 --Strath options
-local strathInRangeOfWayponit = 20 --for when you want to just slide to your wayponit position with strafe
+local strathInRangeOfWayponit = 50 --for when you want to just slide to your wayponit position with strafe
 local strathAngle = 90 --what angle I my strafh at. (90 is always. 0 is only your side is faceing the target)
---PID options
+--options
 --time is litterly time. like the amount of time that passes. dose not need to be stored here at all.
 
 local HeightPID = {P = 1,I = 1,D = 10,Time = 120,Integral=0,Error=0}
@@ -86,7 +86,7 @@ local HeightPIDOn = true;
 --HeightPID.D = 10
 --HeightPID.Time = 120
 
-local ForwardPID = {P = 1,I = 1,D = 10,Time = 120,Integral=0,Error=0}
+local ForwardPID = {P = 1,I = 0.3,D = 1,Time = 120,Integral=0,Error=0}
 local ForwardPIDOn = true;
 
 local YawPID = {P = 1,I = 1,D = 20,Time = 120,Integral=0,Error=0}
@@ -95,12 +95,12 @@ local YawPIDOn = true;
 local StrathPID = {P = 1,I = 1,D = 10,Time = 120,Integral=0,Error=0}
 local StrathPIDOn = true;
 
-local RollPID = {P = 0.1,I = 1,D = 10,Time = 120,Integral=0,Error=0}
+local RollPID = {P = 0.01,I = 1,D = 10,Time = 120,Integral=0,Error=0}
 local RollPIDOn = true;
 local RollSetOn = true;--for when you need PID for your crafts pitch and roll
 local RollSetPonit = 0--
 
-local PitchPID = {P = 0.1,I = 1,D = 10,Time = 120,Integral=0,Error=0}
+local PitchPID = {P = 0.01,I = 1,D = 10,Time = 120,Integral=0,Error=0}
 local PitchPIDOn = true;
 
 local PitchSetOn = true;
@@ -108,13 +108,17 @@ local PitchSetPonit = 0--for when you need PID for your crafts pitch and roll
 
 --////////////////////////////////////////////////////////////////////////////////////////////////--
 
-function PID(X,error)
+function PID(X,error,I)
  local lastError = X.Error
  X.Error = error
  --applyP--
  local correction = X.Error *X.P
  --applyI
- X.Integral = (X.Integral * (X.Time - 1) + X.Error)/X.Time
+ local tempT = (I:GetTimeSinceSpawn() - X.Time) * 41
+ --I:Log("PID")
+ --I:Log(tempT)
+ X.Time = I:GetTimeSinceSpawn()
+ X.Integral = (X.Integral * (tempT - 1) + X.Error)/tempT
  correction = correction + X.Integral*X.I
  --applyD
  return correction + (X.Error - lastError) * X.D
@@ -283,28 +287,13 @@ function avoidFindWaypont(AvoidRanges,c,I)
  if avoided then
   --adjust movePos to be moveing turds this angle.
   I:Log("finding avoid wayponit")
-  I:Log(angle)
   length = (orderCompleatDistince + avoidRange) + 10 --. angle = angle. direction = angle / 90.
   --getAB(ab,length) --: a = angle, b = 90 - angle. length = length.
-  --X direction = angle / 180 -> [0 = 1, 1 = -1]
-  --Z direction = (angle + 90 % 360) / 180 -> [0 = 1, 1 = -1]
-  --0 - 89 [1,1], 90 - 179 [-1,1], 180,269 = [-1-1], 270,359 [1,-1]
-  local DX = getAB(angle % 90,length)
-  local DZ = getAB(90 - (angle % 90),length)
-  I:Log(DX)
-  I:Log(DZ)
-  if ((angle) % 360) > 180 then
-   DX = DX * -1
-  end
-  if ((angle + 90) % 360) > 180 then
-   DZ = DZ * -1
-  end
-  I:Log(DX)
-  I:Log(DZ)
-  movePos.x = movePos.x + DX
+  exstraPos = getABFrom360Angle(angle,length,I)
+  movePos.x = movePos.x + exstraPos.x
   --movePos.y = movePos.y
   movePos.y = balanceHeight(movePos.y,I)
-  movePos.z = movePos.z + DZ
+  movePos.z = movePos.z + exstraPos.z
   return movePos
  end
  return movePos
@@ -336,29 +325,50 @@ function adjustTarget(targetData,I)
  local mySize = getMySize(I)
  local targetSize = getFriendlySize(targetData,I)
  local myPos = I:GetConstructPosition()
-
- local angle = math.atan2(myPos.x - targetPos.x,myPos.z - targetPos.z) * ( 180 / math.pi )
- if angle < 0 then angle = 360 + angle end
  I:Log("adjustments")
- I:Log(angle)
  local length = distinceFromTarget + ((mySize + targetSize
 ) * DFTSizeMulti)
  I:Log(length)
- angle = angle % 90
- local DX = getAB(angle,length)
- local DZ = getAB(90 - angle,length)
+ I:Log(I:GetConstructYaw())
+ exstraPos = getABFromMyPosTargetPos(myPos,targetPos,length,I)
+ targetPos.x = targetPos.x + exstraPos.x
+ targetPos.y = FindHeight(targetPos,myPos,I)
+ targetPos.z = targetPos.z + exstraPos.z
+return targetPos
+end
+
+
+function getABFromMyPosTargetPos(myPos,targetPos,length,I)
+ I:Log(myPos.z - targetPos.z)
+ I:Log(myPos.x - targetPos.x)
+ local angle = math.atan2((myPos.z - targetPos.z),myPos.x - targetPos.x) * ( 180 / math.pi )
+ if angle < 0 then angle = 360 + angle end
+ return getABFrom360Angle(angle,length,I)
+end
+
+function getABFrom360Angle(angle,length,I)
+ --I:Log("adjustments")
+ I:Log(angle)
+ I:Log(length)
+ local DX = 1
+ local DZ = 1
  if ((angle) % 360) > 180 then
   DX = DX * -1
  end
  if ((angle + 90) % 360) > 180 then
   DZ = DZ * -1
  end
- I:Log(DZ)
  I:Log(DX)
- targetPos.x = targetPos.x + DX
- targetPos.y = FindHeight(targetPos,myPos,I)
- targetPos.z = targetPos.z + DZ
-return targetPos
+ I:Log(DZ)
+ angle = angle % 90
+ DX = DX * getAB(angle,length)
+ DZ = DZ * getAB(90 - angle,length)
+ I:Log(DX)
+ I:Log(DZ)
+ I:Log(math.atan2(DX,DZ) * ( 180 / math.pi ))
+ retrunPos = {x = DX, y = 0, z = DZ
+}
+ return retrunPos
 end
 
 --Waypont Movement Code--
@@ -410,14 +420,14 @@ function goToPos(targetPos,targetAngle,I)
  if controlRoll and RorP and there == false then
   ApplyRoll(I)
  elseif RollSetOn then
-  I:Log("applying Roll")
+  --I:Log("applying Roll")
   ApplyRoll(RollSetPonit,I)
  end
  if controlPitch and RorP and there == false then
   --FindHeight(targetPos,myPos,I)
   ApplyPitch(I)
  elseif PitchSetOn then
-  I:Log("applying pitch")
+  --I:Log("applying pitch")
   ApplyPitch(PitchSetPonit,I)
  end
  
@@ -449,7 +459,7 @@ end
 
 function ApplyHeight(myPos,Height,I)
  if HeightPIDOn then
-  I:SetPropulsionRequest(7, PID(HeightPID,Height - myPos.y))
+  I:SetPropulsionRequest(7, PID(HeightPID,Height - myPos.y,I))
   return
  end
  local drive = 1
@@ -467,29 +477,27 @@ end
 function ApplyPitch(drive,I)
 --will control Pitch based altattood controls
  drive = getAngleOffset(drive,I:GetConstructPitch())
- I:Log(I:GetConstructPitch())
- I:Log(drive)
+ --I:Log(I:GetConstructPitch())
+ --I:Log(drive)
  if PitchPIDOn then
-  I:SetPropulsionRequest(4,PID(PitchPID,drive)
-)
+  I:SetPropulsionRequest(4,PID(PitchPID,drive,I))
   return
  end
  I:SetPropulsionRequest(4,drive)
 end
 
 function ApplyRoll(drive,I)
- I:Log(drive)
+ --I:Log(drive)
  local myRoll = I:GetConstructRoll()
  --if myRoll < 0 then myRoll = 360 + myRoll end
  drive = getAngleOffset(drive,I:GetConstructRoll())
- I:Log(I:GetConstructRoll())
- I:Log(drive)
+ --I:Log(I:GetConstructRoll())
+ --I:Log(drive)
  --drive = drive * -1
  --I:Log(drive)
 --will control Roll bassed turning controls.
  if RollPIDOn then
-  I:SetPropulsionRequest(3,PID(RollPID,drive)
-)
+  I:SetPropulsionRequest(3,PID(RollPID,drive,I))
   return
  end
  I:SetPropulsionRequest(3,drive)
@@ -516,7 +524,7 @@ end
 
 function ApplyForward(drive,I)
  if ForwardPIDOn then
-  I:SetPropulsionRequest(6,PID(ForwardPID,drive))
+  I:SetPropulsionRequest(6,PID(ForwardPID,drive,I))
   return
  end
  I:SetPropulsionRequest(6,drive)
@@ -541,7 +549,7 @@ end
 function ApplyStrath(drive,I)
   if StrathPIDOn then
    --StrathPID
-   I:SetPropulsionRequest(8,PID(StrathPID,drive))
+   I:SetPropulsionRequest(8,PID(StrathPID,drive,I))
   return
  end
  --I:Log(secondary)
@@ -576,7 +584,7 @@ function ApplyYaw(reAngle,myAngle,I)
   --end
   reAngle = getAngleOffset(myAngle,reAngle)
   I:Log(reAngle)
-  I:SetPropulsionRequest(5,PID(YawPID,reAngle))
+  I:SetPropulsionRequest(5,PID(YawPID,reAngle,I))
   return
  end
  local angleChange = 1
