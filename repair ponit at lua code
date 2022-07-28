@@ -95,11 +95,16 @@ local YawPIDOn = true;
 local StrathPID = {P = 1,I = 1,D = 10,Time = 120,Integral=0,Error=0}
 local StrathPIDOn = true;
 
-local RollPID = {P = 1,I = 1,D = 10,Time = 120,Integral=0,Error=0}
+local RollPID = {P = 0.1,I = 1,D = 10,Time = 120,Integral=0,Error=0}
 local RollPIDOn = true;
+local RollSetOn = true;--for when you need PID for your crafts pitch and roll
+local RollSetPonit = 0--
 
-local PitchPID = {P = 1,I = 1,D = 10,Time = 120,Integral=0,Error=0}
+local PitchPID = {P = 0.1,I = 1,D = 10,Time = 120,Integral=0,Error=0}
 local PitchPIDOn = true;
+
+local PitchSetOn = true;
+local PitchSetPonit = 0--for when you need PID for your crafts pitch and roll
 
 --////////////////////////////////////////////////////////////////////////////////////////////////--
 
@@ -404,11 +409,18 @@ function goToPos(targetPos,targetAngle,I)
  RorP = RollOrPitch(I)
  if controlRoll and RorP and there == false then
   ApplyRoll(I)
+ elseif RollSetOn then
+  I:Log("applying Roll")
+  ApplyRoll(RollSetPonit,I)
  end
- if controlPitch and RorP and there == false == false then
+ if controlPitch and RorP and there == false then
   --FindHeight(targetPos,myPos,I)
   ApplyPitch(I)
+ elseif PitchSetOn then
+  I:Log("applying pitch")
+  ApplyPitch(PitchSetPonit,I)
  end
+ 
 end
 
 function FindHeight(targetPos,myPos,I)
@@ -451,15 +463,36 @@ end
 function RollOrPitch(I)
 return true--only when i need to Roll right now.
 end
-function ApplyPitch(I)
+
+function ApplyPitch(drive,I)
 --will control Pitch based altattood controls
- local error = 0
- PID(PitchPID,error)
+ drive = getAngleOffset(drive,I:GetConstructPitch())
+ I:Log(I:GetConstructPitch())
+ I:Log(drive)
+ if PitchPIDOn then
+  I:SetPropulsionRequest(4,PID(PitchPID,drive)
+)
+  return
+ end
+ I:SetPropulsionRequest(4,drive)
 end
-function ApplyRoll(I)
+
+function ApplyRoll(drive,I)
+ I:Log(drive)
+ local myRoll = I:GetConstructRoll()
+ --if myRoll < 0 then myRoll = 360 + myRoll end
+ drive = getAngleOffset(drive,I:GetConstructRoll())
+ I:Log(I:GetConstructRoll())
+ I:Log(drive)
+ --drive = drive * -1
+ --I:Log(drive)
 --will control Roll bassed turning controls.
- local error = 0
- PID(RollPID,error)
+ if RollPIDOn then
+  I:SetPropulsionRequest(3,PID(RollPID,drive)
+)
+  return
+ end
+ I:SetPropulsionRequest(3,drive)
 end
 
 function GetForward(pos,myPos,angle,myAngle,I)
