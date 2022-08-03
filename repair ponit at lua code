@@ -10,7 +10,7 @@ end
 
 --Target Prioritation Options:
 --Options: (min / max hp is the min / max HP of the craft that you want to target. filters out all toher craft. finsihed HP is the HP the craft we are targeting can have before it becomes invallid )
-local maxHP = 0.95
+local maxHP = 1--0.95
 local minHP = 0.40
 local finsihedHP = 1
 --Weights: (HP down is one per % of HP lost. so 75% hp craft would generate 25 * HPdownW weight.)
@@ -31,6 +31,7 @@ local distinceFromTarget = 5 -- The distince away from the target that we stop a
 local timeToFindTarget = 1 -- every X seconds, the craft will see if there is an new repaire target
 local timeToAvoidCollision = 0.01 --every X seconds, the craft will see if it can avoid / stop avoiding collisions
 
+--Control movement options
 local controlHight = true;
 local controlYaw = true;
 local controlForward = true;
@@ -74,41 +75,61 @@ local forwardAlwaysDrive = 0 --so planes dont crash from the sky
 local forwardsAngle = 90 --angle to target before we try to move forwards / backwards
 
 --Strath options
-local strathInRangeOfWayponit = 50 --for when you want to just slide to your wayponit position with strafe
+local strathInRangeOfWayponit = 200 --for when you want to just slide to your wayponit position with strafe
 local strathAngle = 90 --what angle I my strafh at. (90 is always. 0 is only your side is faceing the target)
 --options
 --time is litterly time. like the amount of time that passes. dose not need to be stored here at all.
 
-local HeightPID = {P = 1,I = 1,D = 10,Time = 120,Integral=0,Error=0}
+local HeightPID = {P = 0.05,I = 0.05,D = 0.01,Time = 120,IMax = 1,IMin = -1,OMax = 1,OMin = -1,Integral=0,Error=0}
 local HeightPIDOn = true;
---HeightPID.P = 1
---HeightPID.I = 1
---HeightPID.D = 10
---HeightPID.Time = 120
 
-local ForwardPID = {P = 1,I = 0.3,D = 1,Time = 120,Integral=0,Error=0}
+local ForwardPID = {P = 0.05,I = 0.05,D = 0.03,Time = 0,IMax = 1,IMin = -1,OMax = 1,OMin = -1,Integral=0,Error=0}
 local ForwardPIDOn = true;
 
-local YawPID = {P = 1,I = 1,D = 20,Time = 120,Integral=0,Error=0}
+local YawPID = {P = 0.01,I = 0.05,D = 0.03,Time = 0,IMax = 1,IMin = -1,OMax = 1,OMin = -1,Integral=0,Error=0}
 local YawPIDOn = true;
 
-local StrathPID = {P = 1,I = 1,D = 10,Time = 120,Integral=0,Error=0}
+local StrathPID = {P = 0.01,I = 0.01,D = 0.01,Time = 0,IMax = 1,IMin = -1,OMax = 1,OMin = -1,Integral=0,Error=0}
 local StrathPIDOn = true;
 
-local RollPID = {P = 0.01,I = 1,D = 10,Time = 120,Integral=0,Error=0}
+local RollPID = {P = 0.01,I = 0.01,D = 0.01,Time = 0,IMax = 1,IMin = -1,OMax = 1,OMin = -1,Integral=0,Error=0}
 local RollPIDOn = true;
 local RollSetOn = true;--for when you need PID for your crafts pitch and roll
 local RollSetPonit = 0--
 
-local PitchPID = {P = 0.01,I = 1,D = 10,Time = 120,Integral=0,Error=0}
+local PitchPID = {P = 0.01,I = 0.01,D = 0.01,IMax = 1,IMin = -1,OMax = 1,OMin = -1,Time = 0,Integral=0,Error=0}
 local PitchPIDOn = true;
 
 local PitchSetOn = true;
 local PitchSetPonit = 0--for when you need PID for your crafts pitch and roll
 
 --////////////////////////////////////////////////////////////////////////////////////////////////--
+function PID(PID,error,I)
+ --I:Log(error)
+ --local error     = SetPoint - measurement
+ local timeDelta = 0.025
+  
+ local derivative
+ local output
 
-function PID(X,error,I)
+ local temp = PID.Integral + (error*timeDelta)
+ PID.Integral = PID.Integral + (error*timeDelta) * PID.I
+ if (PID.Integral > PID.IMax) then PID.Integral = PID.IMax end
+ if (PID.Integral < PID.IMin) then PID.Integral = PID.IMin end
+ derivative = (error - PID.Error)/timeDelta
+
+ output = PID.P*error + PID.D*derivative + PID.Integral
+ if (output > PID.OMax) then output = PID.OMax end
+ if (output < PID.OMin) then output = PID.OMin end
+
+ PID.Error = error
+ --I:Log(error)
+ --I:Log(PID.Integral)
+ --I:Log(output)
+ return output
+end
+
+function PIDOLD(X,error,I)
  local lastError = X.Error
  X.Error = error
  --applyP--
@@ -155,7 +176,7 @@ function Actavate(I)
  local targetPos = targetData.ReferencePosition
  --Math.atan2( y2 - y1, x2 - x1 ) * ( 180 / Math.PI )
  local targetAngle = math.atan2(targetPos.x - myPos.x, targetPos.z - myPos.z ) * ( 180 / math.pi )
-
+ if(targetAngle < 0) then targetAngle = 360 + targetAngle end
  I:Log("target position")
  I:Log(targetPos.x)
  I:Log(targetPos.y)
@@ -171,6 +192,7 @@ function Actavate(I)
  end
  if avoid[1] then
   I:Log("avoiding other craft...")
+  avoid[2].y = FindHeight(targetPos,myPos,I)
   goToPos(avoid[2],targetAngle,I)
   return -1
  end
@@ -214,7 +236,7 @@ function CollisionAvoidance(I)
        local angle = {AngleXZ,AngleXY,avoidAngle + avoidAngle2}
        AvoidRanges[c] = angle
        c = c + 1
-       I:Log(getAngleOffset(I:GetConstructYaw(),AngleXZ,I))
+       --I:Log(getAngleOffset(I:GetConstructYaw(),AngleXZ,I))
      end
     end
    end
@@ -255,9 +277,10 @@ function avoidFindWaypont(AvoidRanges,c,I)
  end
  I:Log("avoid data")
  for d=0,c - 1,1 do
- I:Log(AvoidRanges[d][1])
- I:Log(AvoidRanges[d][2])
- I:Log(AvoidRanges[d][3])
+ I:Log(AvoidRanges[d][1])--avoid xz angle (direction i want to move)
+ I:Log(I:GetConstructYaw())--my angle
+ I:Log(AvoidRanges[d][2])--avoid xy angle (not used)
+ I:Log(AvoidRanges[d][3])--avoid angle area
  end
  local myPos = I:GetConstructPosition()
  local movePos = {x=myPos.x,y=myPos.y,z=myPos.z}
@@ -269,7 +292,6 @@ function avoidFindWaypont(AvoidRanges,c,I)
   TNumber = TNumber + AvoidRanges[a][3]
  end
  local angle = ((Tangle / TNumber) + 180) % 360
- I:Log(I:GetConstructYaw())
  local avoided = true
  for d=0,c - 1,1 do
   --if AvoidRanges[d] == null then
@@ -286,7 +308,7 @@ function avoidFindWaypont(AvoidRanges,c,I)
  end
  if avoided then
   --adjust movePos to be moveing turds this angle.
-  I:Log("finding avoid wayponit")
+  I:Log("Avoid Wayponit Possable. getting avoid position")
   length = (orderCompleatDistince + avoidRange) + 10 --. angle = angle. direction = angle / 90.
   --getAB(ab,length) --: a = angle, b = 90 - angle. length = length.
   exstraPos = getABFrom360Angle(angle,length,I)
@@ -349,10 +371,14 @@ end
 function getABFrom360Angle(angle,length,I)
  --I:Log("adjustments")
  I:Log(angle)
+ --I:Log(I:GetConstructYaw())
  I:Log(length)
  local DX = 1
  local DZ = 1
- if ((angle) % 360) > 180 then
+ --HERE-- 
+ --the DX,DZ multiplyers are wrong. need to draw this out in my notebook
+ --also something is very very wrong with my forward drive.
+ if ((angle + 90) % 360) > 180 then
   DX = DX * -1
  end
  if ((angle + 90) % 360) > 180 then
@@ -378,22 +404,28 @@ function goToPos(targetPos,targetAngle,I)
  I:Log(targetPos.x)
  I:Log(targetPos.y)
  I:Log(targetPos.z)
- I:Log(targetAngle)
+ --I:Log(targetAngle)
  local myYaw = I:GetConstructYaw()
  local myPos = I:GetConstructPosition()
- I:Log("--")
+ --I:Log("--")
  I:Log("my pos:")
  I:Log(myPos.x)
  I:Log(myPos.y)
  I:Log(myPos.z)
- I:Log(myYaw)
+ --I:Log(myYaw)
  I:Log("--")
- I:Log("turn")
+
+ --I:Log("Relitive movement:")
+ --I:Log(targetPos.x - myPos.x)
+ --I:Log(targetPos.y - myPos.y)
+ --I:Log(targetPos.z - myPos.z)
  I:Log(getAngleOffset(myYaw,targetAngle,I))
+ I:Log("--")
  local requestedAngle = FindAngle(targetPos,myPos,I)
  local there = inXZRange(myPos,targetPos,orderCompleatDistince,I)
  local inStrathRange = inXZRange(myPos,targetPos,strathInRangeOfWayponit,I)
  if controlYaw then
+  I:Log("Yaw")
   if there == false and (inStrathRange == false or controlStrath == false) then
    ApplyYaw(requestedAngle,myYaw,I)
    --I:Log("requestedAngle")
@@ -403,26 +435,34 @@ function goToPos(targetPos,targetAngle,I)
   end
  end
  if controlHight then -- and notThere then
+  I:Log("Height")
   ApplyHeight(myPos,targetPos.y,I)
  end
  if controlStrath and there == false and inStrathRange then
-  I:Log("Strath")
+  --I:Log("Strath")
   ApplyStrath(GetStrath(targetPos,myPos,requestedAngle,myYaw,I),I)
  end
  if controlForward then
+  I:Log("Forward")
   if forwardAlwaysDrive ~= 0 then
    ApplyForward(forwardAlwaysDrive,I)
   elseif there == false then
+   --I:Log(requestedAngle)
+   --I:Log(myYaw)
    ApplyForward(GetForward(targetPos,myPos,requestedAngle,myYaw,I),I)
+  else
+   ApplyForward(0,I)
   end
  end
  RorP = RollOrPitch(I)
+ I:Log("Roll")
  if controlRoll and RorP and there == false then
   ApplyRoll(I)
  elseif RollSetOn then
   --I:Log("applying Roll")
   ApplyRoll(RollSetPonit,I)
  end
+ I:Log("Pitch")
  if controlPitch and RorP and there == false then
   --FindHeight(targetPos,myPos,I)
   ApplyPitch(I)
@@ -514,15 +554,23 @@ function GetForward(pos,myPos,angle,myAngle,I)
  distince = getAB(offset % 90,math.sqrt((myPos.x - pos.x)^2 + (myPos.z - pos.z)^2))
  --I:Log("distinceX")
  --I:Log(distince)
+ --I:Log(offset)
+ --I:Log(distince)
  if offset >= -forwardsAngle and offset <= forwardsAngle then
+  I:Log("forward")
   return math.max(distince,distince * -1)--1--direction * -1
  elseif (offset + 180) >= -(forwardsAngle) and (offset + 180) <= forwardsAngle then
+  I:Log("backward")
   return math.min(distince,distince * -1)--1--direction
  end
- return 0
+ I:Log("other")
+ return null
 end
 
 function ApplyForward(drive,I)
+ if drive == null then
+  return null
+ end
  if ForwardPIDOn then
   I:SetPropulsionRequest(6,PID(ForwardPID,drive,I))
   return
