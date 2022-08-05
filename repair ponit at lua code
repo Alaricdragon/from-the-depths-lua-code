@@ -591,10 +591,13 @@ function GetStrath(pos,myPos,reAngle,myAngle,I)
  elseif (offset + 180) >= -(strathAngle) and (offset + 180) <= strathAngle then
   return math.min(distince,distince * -1)--1--direction
  end
- return distince
+ return null
 end
 
 function ApplyStrath(drive,I)
+  if drive == null then
+   return null
+  end
   if StrathPIDOn then
    --StrathPID
    I:SetPropulsionRequest(8,PID(StrathPID,drive,I))
