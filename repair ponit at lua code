@@ -10,7 +10,7 @@ end
 
 --Target Prioritation Options:
 --Options: (min / max hp is the min / max HP of the craft that you want to target. filters out all toher craft. finsihed HP is the HP the craft we are targeting can have before it becomes invallid )
-local maxHP = 1--0.95
+local maxHP = 0.95
 local minHP = 0.40
 local finsihedHP = 1
 --Weights: (HP down is one per % of HP lost. so 75% hp craft would generate 25 * HPdownW weight.)
@@ -277,10 +277,10 @@ function avoidFindWaypont(AvoidRanges,c,I)
  end
  I:Log("avoid data")
  for d=0,c - 1,1 do
- I:Log(AvoidRanges[d][1])--avoid xz angle (direction i want to move)
- I:Log(I:GetConstructYaw())--my angle
- I:Log(AvoidRanges[d][2])--avoid xy angle (not used)
- I:Log(AvoidRanges[d][3])--avoid angle area
+ --I:Log(AvoidRanges[d][1])--avoid xz angle (direction i want to move)
+ --I:Log(I:GetConstructYaw())--my angle
+ --I:Log(AvoidRanges[d][2])--avoid xy angle (not used)
+ --I:Log(AvoidRanges[d][3])--avoid angle area
  end
  local myPos = I:GetConstructPosition()
  local movePos = {x=myPos.x,y=myPos.y,z=myPos.z}
@@ -288,21 +288,33 @@ function avoidFindWaypont(AvoidRanges,c,I)
  local TAngle = 0
  local TNumber = 0
  for a=0,c - 1,1 do
-  Tangle = TAngle + (AvoidRanges[a][1] * AvoidRanges[a][3])
-  TNumber = TNumber + AvoidRanges[a][3]
+  Tangle = TAngle + AvoidRanges[a][1]--(AvoidRanges[a][1] * AvoidRanges[a][3])
+  TNumber = TNumber + 1--AvoidRanges[a][3]
  end
- local angle = ((Tangle / TNumber) + 180) % 360
+ I:Log(I:GetConstructYaw())
+ I:Log("T")
+ I:Log(Tangle)
+ I:Log(TNumber)
+ local angle = ((Tangle / TNumber)) % 360
+ I:Log(Tangle)
  local avoided = true
- for d=0,c - 1,1 do
-  --if AvoidRanges[d] == null then
-   --a = a + 1
-  --end
-  local avoid2 = AvoidRanges[d]
-  --if angle drives me into angle of another craft. 
-  local temp = (getAngleOffset(angle,avoid2[1],I))
-  temp = math.max(temp,temp*-1)
-  if temp <= avoidAngle then
-   avoided = false
+ for e = 0,1, 1 do
+  angle = (angle + 180) % 360
+  for d=0,c - 1,1 do
+   --if AvoidRanges[d] == null then
+    --a = a + 1
+   --end
+   local avoid2 = AvoidRanges[d]
+   --if angle drives me into angle of another craft. 
+   local temp = (getAngleOffset(angle,avoid2[1],I))
+   temp = math.max(temp,temp*-1)
+   if temp <= avoidAngle then
+    I:Log("avoid attempt failed...")
+    avoided = false
+    break
+   end
+  end
+  if avoided == true then
    break
   end
  end
@@ -311,13 +323,15 @@ function avoidFindWaypont(AvoidRanges,c,I)
   I:Log("Avoid Wayponit Possable. getting avoid position")
   length = (orderCompleatDistince + avoidRange) + 10 --. angle = angle. direction = angle / 90.
   --getAB(ab,length) --: a = angle, b = 90 - angle. length = length.
+  I:Log(angle)
   exstraPos = getABFrom360Angle(angle,length,I)
   movePos.x = movePos.x + exstraPos.x
-  --movePos.y = movePos.y
+  --movePos.y = mI:GetConstructYaw()ovePos.y
   movePos.y = balanceHeight(movePos.y,I)
   movePos.z = movePos.z + exstraPos.z
   return movePos
  end
+ movePos.y = balanceHeight(movePos.y,I)
  return movePos
 end
 
@@ -369,7 +383,7 @@ function getABFromMyPosTargetPos(myPos,targetPos,length,I)
 end
 
 function getABFrom360Angle(angle,length,I)
- --I:Log("adjustments")
+ I:Log("adjustments")
  I:Log(angle)
  --I:Log(I:GetConstructYaw())
  I:Log(length)
@@ -377,7 +391,7 @@ function getABFrom360Angle(angle,length,I)
  local DZ = 1
  --HERE-- 
  --the DX,DZ multiplyers are wrong. need to draw this out in my notebook
- --also something is very very wrong with my forward drive.
+ --very wrong. i have narrowed this down to only this. something here has gone bad....
  if ((angle + 90) % 360) > 180 then
   DX = DX * -1
  end
@@ -442,7 +456,7 @@ function goToPos(targetPos,targetAngle,I)
   --I:Log("Strath")
   ApplyStrath(GetStrath(targetPos,myPos,requestedAngle,myYaw,I),I)
  end
- if controlForward then
+ if controlForward and there == false then
   I:Log("Forward")
   if forwardAlwaysDrive ~= 0 then
    ApplyForward(forwardAlwaysDrive,I)
